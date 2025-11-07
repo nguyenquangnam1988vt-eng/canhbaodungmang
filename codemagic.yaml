@@ -9,6 +9,14 @@ workflows:
       - name: Install dependencies
         script: flutter pub get
       - name: Build iOS
-        script: flutter build ios --release
+        script: flutter build ios
     artifacts:
       - build/ios/ipa/*.ipa
+    signing:
+      ios:
+        distribution_certificate:
+          base64: $CM_CERTIFICATE_BASE64          # biến môi trường chứa certificate .p12 (base64)
+          certificate_password: $CERT_PASSWORD    # mật khẩu của certificate
+        provisioning_profile:
+          base64: $CM_PROFILE_BASE64              # biến môi trường chứa provisioning profile (base64)
+        apple_signing: true                        # bật tự động ký
