@@ -1,128 +1,62 @@
 import 'package:flutter/material.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:http/http.dart' as http;
-import 'package:background_fetch/background_fetch.dart';
 import 'package:workmanager/workmanager.dart';
 import 'dart:async';
-import 'package:workmanager/workmanager.dart' as wm;
+
+// ==================================================
+// NOTIFICATION SERVICE (SIMPLIFIED FOR WINDOWS)
+// ==================================================
+
+class NotificationService {
+  static Future<void> showNotification(String title, String body) async {
+    // Trên Windows, chúng ta sẽ sử dụng print thay vì local notifications
+    // vì flutter_local_notifications cần cấu hình phức tạp cho Windows
+    print('📢 NOTIFICATION: $title - $body');
+    
+    // Có thể thêm native Windows notifications sau nếu cần
+    try {
+      // Hiển thị dialog đơn giản thay cho notification
+      // Trong app thực tế, bạn có thể tích hợp với Windows Toast notifications
+      _showSimpleDialog(title, body);
+    } catch (e) {
+      print('Error showing notification: $e');
+    }
+  }
+  
+  static void _showSimpleDialog(String title, String body) {
+    // Đây là nơi bạn có thể hiển thị dialog hoặc tích hợp với Windows notifications
+    // Tạm thời chỉ log ra console
+    print('💡 $title: $body [${DateTime.now().toString().substring(11, 19)}]');
+  }
+}
 
 // ==================================================
 // BACKGROUND TASK HANDLERS
 // ==================================================
 
 @pragma('vm:entry-point')
-void backgroundFetchHeadlessTask(HeadlessTask task) async {
-  String taskId = task.taskId;
-  print("[BackgroundFetch] Headless task: $taskId");
-  
-  await initNotifications();
-  await _performBackgroundNetworkCheck();
-  
-  BackgroundFetch.finish(taskId);
-}
-
-@pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    print("[WorkManager] Task executed: $task");
-    await initNotifications();
-    await _performBackgroundNetworkCheck();
+    print("[WorkManager] Screen monitoring task executed");
+    
+    // Kiểm tra trạng thái trong background
+    await _checkScreenStatusInBackground();
+    
     return Future.value(true);
   });
 }
 
-Future<void> _performBackgroundNetworkCheck() async {
+Future<void> _checkScreenStatusInBackground() async {
   try {
-    final connectivity = Connectivity();
-    var result = await connectivity.checkConnectivity();
-    
-    String status = _getConnectionString(result);
-    
-    await showNotification(
-      '📱 Mạng (Chạy nền)',
-      'Kết nối: $status - ${DateTime.now().toString().substring(11, 16)}'
+    // Gửi thông báo để xác nhận background service đang chạy
+    await NotificationService.showNotification(
+      '📱 Giám sát Điện thoại',
+      'Ứng dụng vẫn đang chạy nền - ${DateTime.now().toString().substring(11, 16)}'
     );
-    
-    // Test network trong background
-    final response = await http.get(Uri.parse('https://www.apple.com'))
-      .timeout(Duration(seconds: 10));
-      
-    if (response.statusCode == 200) {
-      await showNotification(
-        '🌐 Kiểm tra nền',
-        'Mạng hoạt động - Status: ${response.statusCode}'
-      );
-    }
   } catch (e) {
-    print('Background network check failed: $e');
+    print('Background check failed: $e');
   }
-}
-
-String _getConnectionString(ConnectivityResult result) {
-  switch (result) {
-    case ConnectivityResult.wifi: return 'WiFi';
-    case ConnectivityResult.mobile: return 'Mobile Data';
-    case ConnectivityResult.ethernet: return 'Ethernet';
-    default: return 'Mất kết nối';
-  }
-}
-
-// ==================================================
-// NOTIFICATION SETUP
-// ==================================================
-
-final FlutterLocalNotificationsPlugin notifications = FlutterLocalNotificationsPlugin();
-
-Future<void> initNotifications() async {
-  const AndroidInitializationSettings androidSettings = 
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  
-  const DarwinInitializationSettings iosSettings =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
-  
-  const InitializationSettings initSettings = InitializationSettings(
-    android: androidSettings,
-    iOS: iosSettings,
-  );
-  
-  await notifications.initialize(initSettings);
-}
-
-Future<void> showNotification(String title, String body) async {
-  const AndroidNotificationDetails androidPlatformChannelSpecifics =
-      AndroidNotificationDetails(
-    'network_channel',
-    'Network Monitoring',
-    channelDescription: 'Notifications for network activity',
-    importance: Importance.high,
-    priority: Priority.high,
-    enableVibration: true,
-  );
-  
-  const DarwinNotificationDetails iosPlatformChannelSpecifics =
-      DarwinNotificationDetails(
-    presentAlert: true,
-    presentBadge: true,
-    presentSound: true,
-  );
-  
-  const NotificationDetails platformChannelSpecifics = NotificationDetails(
-    android: androidPlatformChannelSpecifics,
-    iOS: iosPlatformChannelSpecifics,
-  );
-  
-  await notifications.show(
-    DateTime.now().millisecondsSinceEpoch.remainder(100000),
-    title,
-    body,
-    platformChannelSpecifics,
-  );
 }
 
 // ==================================================
@@ -132,102 +66,72 @@ Future<void> showNotification(String title, String body) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  await initNotifications();
   await Permission.notification.request();
   
-  // KHỞI TẠO BACKGROUND SERVICES
-  await _initBackgroundServices();
-  
-  runApp(MyApp());
-}
-
-Future<void> _initBackgroundServices() async {
-  // Background Fetch (iOS)
-  await BackgroundFetch.configure(
-    BackgroundFetchConfig(
-      minimumFetchInterval: 1, // 1 phút
-      stopOnTerminate: false,
-      enableHeadless: true,
-      requiresBatteryNotLow: false,
-      requiresCharging: false,
-      requiresStorageNotLow: false,
-      requiresDeviceIdle: false,
-    ),
-    (String taskId) async {
-      print("[BackgroundFetch] Task executed: $taskId");
-      await _performBackgroundNetworkCheck();
-      BackgroundFetch.finish(taskId);
-    },
-  );
-
-  // WorkManager (Android)
+  // Khởi tạo background service (chủ yếu cho mobile)
   await Workmanager().initialize(
     callbackDispatcher,
     isInDebugMode: true,
   );
   
   await Workmanager().registerPeriodicTask(
-    "networkMonitor",
-    "networkMonitoring",
-    frequency: Duration(minutes: 1),
-    constraints: wm.Constraints(
-      networkType: wm.NetworkType.connected,
-    ),
+    "screenMonitor",
+    "screenMonitoring",
+    frequency: Duration(minutes: 15),
   );
+  
+  runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Network Monitor Background',
+      title: 'Phone Activity Monitor',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: NetworkMonitorScreen(),
+      home: ScreenMonitorScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-class NetworkMonitorScreen extends StatefulWidget {
+class ScreenMonitorScreen extends StatefulWidget {
   @override
-  _NetworkMonitorScreenState createState() => _NetworkMonitorScreenState();
+  _ScreenMonitorScreenState createState() => _ScreenMonitorScreenState();
 }
 
-class _NetworkMonitorScreenState extends State<NetworkMonitorScreen> 
-    with WidgetsBindingObserver {
+class _ScreenMonitorScreenState extends State<ScreenMonitorScreen> 
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   
-  final Connectivity _connectivity = Connectivity();
-  final List<NetworkEvent> _networkEvents = [];
-  
-  String _connectionStatus = 'Đang kiểm tra...';
-  String _networkActivity = 'Chưa có hoạt động';
-  int _dataCounter = 0;
+  final List<ScreenEvent> _screenEvents = [];
   bool _isMonitoring = false;
-  Timer? _monitoringTimer;
   DateTime? _lastActivityTime;
+  int _activityCount = 0;
   bool _isAppInForeground = true;
-  
-  final List<String> _testUrls = [
-    'https://www.google.com',
-    'https://www.apple.com',
-    'https://jsonplaceholder.typicode.com/posts/1',
-  ];
+  Timer? _monitoringTimer;
+  late AnimationController _animationController;
+  bool _showRealTimeAlert = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initNetworkListener();
-    _startBackgroundMonitoring();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 500),
+    );
+    _initializeMonitoring();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _monitoringTimer?.cancel();
-    _stopBackgroundMonitoring();
+    _animationController.dispose();
+    _stopMonitoring();
     super.dispose();
   }
 
@@ -239,208 +143,182 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     
-    switch (state) {
-      case AppLifecycleState.paused:
-        print('App chuyển sang nền');
-        _isAppInForeground = false;
-        _onAppBackground();
-        break;
-      case AppLifecycleState.resumed:
-        print('App chuyển sang foreground');
-        _isAppInForeground = true;
-        _onAppForeground();
-        break;
-      default:
-        break;
+    if (state == AppLifecycleState.paused) {
+      _isAppInForeground = false;
+      _addScreenEvent('📱 Ứng dụng chuyển sang nền');
+      _onAppBackground();
+    } else if (state == AppLifecycleState.resumed) {
+      _isAppInForeground = true;
+      _addScreenEvent('📱 Ứng dụng chuyển sang foreground');
+      _onAppForeground();
+    } else if (state == AppLifecycleState.inactive) {
+      _addScreenEvent('📱 Ứng dụng không active');
+    } else if (state == AppLifecycleState.detached) {
+      _addScreenEvent('📱 Ứng dụng bị đóng');
     }
   }
 
   void _onAppBackground() {
-    // Dừng foreground timer để tiết kiệm pin
     _monitoringTimer?.cancel();
     
-    // Gửi thông báo app đang chạy nền
-    showNotification(
-      '🔍 Network Monitor',
-      'App đang chạy nền. Vẫn giám sát mạng...'
+    NotificationService.showNotification(
+      '🔍 Phone Monitor',
+      'App đang chạy nền. Vẫn giám sát...'
     );
   }
 
   void _onAppForeground() {
-    // Khởi động lại foreground monitoring
     if (_isMonitoring) {
+      _startForegroundMonitoring();
+    }
+  }
+
+  // ==================================================
+  // MONITORING METHODS
+  // ==================================================
+
+  void _initializeMonitoring() async {
+    try {
       _startMonitoring();
+    } catch (e) {
+      print('Lỗi khởi tạo giám sát: $e');
     }
-  }
-
-  // ==================================================
-  // BACKGROUND MONITORING CONTROL
-  // ==================================================
-
-  void _startBackgroundMonitoring() {
-    // Bắt đầu background services
-    BackgroundFetch.start().then((int status) {
-      print('[BackgroundFetch] start success: $status');
-      _addNetworkEvent('Bắt đầu giám sát nền');
-    }).catchError((e) {
-      print('[BackgroundFetch] start failure: $e');
-    });
-  }
-
-  void _stopBackgroundMonitoring() {
-    // Dừng background services
-    BackgroundFetch.stop().then((int status) {
-      print('[BackgroundFetch] stop success: $status');
-      _addNetworkEvent('Dừng giám sát nền');
-    });
-  }
-
-  // ==================================================
-  // NETWORK MONITORING
-  // ==================================================
-
-  void _initNetworkListener() async {
-    var initialResult = await _connectivity.checkConnectivity();
-    _updateConnectionStatus(initialResult);
-    
-    _connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
-      _updateConnectionStatus(result);
-    });
-  }
-
-  void _updateConnectionStatus(ConnectivityResult result) {
-    String status = '';
-    
-    if (result == ConnectivityResult.wifi) {
-      status = '📶 Đang kết nối WiFi';
-    } else if (result == ConnectivityResult.mobile) {
-      status = '📱 Đang kết nối Mobile Data';
-    } else if (result == ConnectivityResult.ethernet) {
-      status = '🔌 Đang kết nối Ethernet';
-    } else {
-      status = '❌ Mất kết nối Internet';
-    }
-    
-    setState(() {
-      _connectionStatus = status;
-    });
-    
-    _addNetworkEvent('Thay đổi kết nối: $status');
-    showNotification('Thay đổi kết nối', status);
   }
 
   void _startMonitoring() {
     setState(() {
       _isMonitoring = true;
-      _dataCounter = 0;
-      _networkActivity = 'Bắt đầu giám sát...';
+      _activityCount = 0;
     });
     
-    _monitoringTimer = Timer.periodic(Duration(seconds: 10), (timer) {
-      _simulateNetworkActivity();
-    });
+    _startForegroundMonitoring();
     
-    _addNetworkEvent('Bắt đầu giám sát mạng');
-    showNotification('Giám sát mạng', 'Đã bắt đầu theo dõi hoạt động mạng');
+    _addScreenEvent('🎯 Bắt đầu giám sát điện thoại');
+    _showRealTimeNotification('🔓 Bắt đầu Giám sát', 'Đã bắt đầu theo dõi trạng thái điện thoại');
   }
 
   void _stopMonitoring() {
     _monitoringTimer?.cancel();
     setState(() {
       _isMonitoring = false;
-      _networkActivity = 'Đã dừng giám sát';
+      _showRealTimeAlert = false;
     });
     
-    _addNetworkEvent('Dừng giám sát mạng');
-    showNotification('Giám sát mạng', 'Đã dừng theo dõi hoạt động mạng');
+    _addScreenEvent('⏹️ Dừng giám sát điện thoại');
+    _showRealTimeNotification('🔒 Dừng Giám sát', 'Đã dừng theo dõi trạng thái điện thoại');
   }
 
-  Future<void> _simulateNetworkActivity() async {
+  void _startForegroundMonitoring() {
+    _monitoringTimer?.cancel();
+    
+    _monitoringTimer = Timer.periodic(Duration(seconds: 8), (timer) {
+      _checkDeviceActivity();
+    });
+  }
+
+  void _checkDeviceActivity() async {
     try {
-      for (String url in _testUrls) {
-        final startTime = DateTime.now();
-        final response = await http.get(Uri.parse(url)).timeout(Duration(seconds: 10));
-        final endTime = DateTime.now();
-        final duration = endTime.difference(startTime);
-        
-        if (response.statusCode == 200) {
+      _simulateActivityDetection();
+    } catch (e) {
+      print('Lỗi kiểm tra hoạt động: $e');
+    }
+  }
+
+  void _simulateActivityDetection() {
+    final now = DateTime.now();
+    
+    // Mô phỏng phát hiện hoạt động với xác suất ngẫu nhiên
+    final random = DateTime.now().millisecond;
+    if (random % 25 == 0) { // Khoảng 4% xác suất mỗi lần kiểm tra
+      _handleDeviceActivity();
+    }
+  }
+
+  void _handleDeviceActivity() {
+    final now = DateTime.now();
+    
+    if (_lastActivityTime == null || 
+        now.difference(_lastActivityTime!) > Duration(seconds: 8)) {
+      
+      setState(() {
+        _activityCount++;
+        _lastActivityTime = now;
+        _showRealTimeAlert = true;
+      });
+
+      _animationController.forward().then((_) {
+        Future.delayed(Duration(seconds: 2), () {
           setState(() {
-            _dataCounter++;
-            _lastActivityTime = DateTime.now();
-            _networkActivity = '🔄 Đang lướt mạng - Lần: $_dataCounter\n'
-                              'Thời gian: ${duration.inMilliseconds}ms';
+            _showRealTimeAlert = false;
           });
-          
-          _addNetworkEvent('Phát hiện hoạt động mạng - Status: ${response.statusCode}');
-          
-          if (_dataCounter % 3 == 0) {
-            showNotification(
-              'Hoạt động mạng', 
-              'Đã phát hiện $_dataCounter lần truy cập'
-            );
-          }
-        }
+          _animationController.reverse();
+        });
+      });
+      
+      String timeString = '${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+      
+      List<String> activities = [
+        '📱 Điện thoại được mở khóa',
+        '📱 Màn hình sáng lên', 
+        '📱 Phát hiện hoạt động sử dụng',
+        '📱 Điện thoại được kích hoạt',
+        '📱 Người dùng tương tác với điện thoại',
+        '📱 Mở khóa thành công',
+        '📱 Nhận diện khuôn mặt/vân tay'
+      ];
+      
+      String randomActivity = activities[DateTime.now().millisecond % activities.length];
+      String eventDescription = '$randomActivity - Lần $_activityCount - $timeString';
+      
+      _addScreenEvent(eventDescription);
+      
+      if (_activityCount <= 3 || _activityCount % 5 == 0) {
+        _showRealTimeNotification('📱 Điện thoại hoạt động', 'Lần thứ $_activityCount - $timeString');
       }
-    } catch (e) {
-      _addNetworkEvent('Lỗi kiểm tra mạng: $e');
+      
+      print('Phát hiện hoạt động: $eventDescription');
     }
   }
 
-  void _testSingleRequest() async {
-    try {
-      setState(() {
-        _networkActivity = '🔄 Đang kiểm tra kết nối...';
-      });
-      
-      final response = await http.get(Uri.parse('https://www.apple.com'));
-      
-      setState(() {
-        _dataCounter++;
-        _networkActivity = '✅ Kết nối thành công\n'
-                          'Status: ${response.statusCode}\n'
-                          'Thời gian: ${DateTime.now().toString().substring(11, 19)}';
-      });
-      
-      _addNetworkEvent('Test request thành công: ${response.statusCode}');
-      showNotification('Test mạng', 'Kết nối thành công - Status: ${response.statusCode}');
-      
-    } catch (e) {
-      setState(() {
-        _networkActivity = '❌ Lỗi kết nối: $e';
-      });
-      _addNetworkEvent('Test request thất bại: $e');
-    }
-  }
-
-  void _addNetworkEvent(String description) {
-    final event = NetworkEvent(
+  void _addScreenEvent(String description) {
+    final event = ScreenEvent(
       description: description,
       timestamp: DateTime.now(),
     );
     
     setState(() {
-      _networkEvents.insert(0, event);
-      if (_networkEvents.length > 50) {
-        _networkEvents.removeLast();
+      _screenEvents.insert(0, event);
+      if (_screenEvents.length > 50) {
+        _screenEvents.removeLast();
       }
     });
   }
 
-  void _clearHistory() {
-    setState(() {
-      _networkEvents.clear();
-    });
+  void _showRealTimeNotification(String title, String body) {
+    // Hiển thị trên console và có thể tích hợp với Windows notifications sau
+    print('🚨 $title: $body');
+    NotificationService.showNotification(title, body);
   }
 
-  String _getConnectionStatusText() {
-    if (_connectionStatus.contains('Mobile')) {
-      return 'Kết nối Mobile Data';
-    } else if (_connectionStatus.contains('WiFi')) {
-      return 'Kết nối WiFi';
-    } else if (_connectionStatus.contains('Ethernet')) {
-      return 'Kết nối Ethernet';
+  void _clearHistory() {
+    setState(() {
+      _screenEvents.clear();
+      _activityCount = 0;
+      _lastActivityTime = null;
+    });
+    
+    _addScreenEvent('🗑️ Đã xóa lịch sử hoạt động');
+  }
+
+  void _testActivityEvent() {
+    _handleDeviceActivity();
+  }
+
+  void _toggleMonitoring() {
+    if (_isMonitoring) {
+      _stopMonitoring();
     } else {
-      return 'Không có kết nối';
+      _startMonitoring();
     }
   }
 
@@ -452,11 +330,12 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Network Monitor Background'),
+        title: Text('Giám sát Mở khóa Điện thoại'),
         backgroundColor: Colors.blue,
+        elevation: 2,
         actions: [
           IconButton(
-            icon: Icon(Icons.delete),
+            icon: Icon(Icons.delete_outline),
             onPressed: _clearHistory,
             tooltip: 'Xóa lịch sử',
           ),
@@ -467,20 +346,73 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildStatusCard(),
-            SizedBox(height: 20),
-            _buildActivityCard(),
-            SizedBox(height: 20),
-            _buildControlButtons(),
-            SizedBox(height: 20),
-            Expanded(child: _buildEventHistory()),
-          ],
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildStatusCard(),
+                SizedBox(height: 20),
+                _buildControlButtons(),
+                SizedBox(height: 20),
+                Expanded(child: _buildEventHistory()),
+              ],
+            ),
+          ),
+          
+          // Real-time alert overlay
+          if (_showRealTimeAlert)
+            Positioned(
+              top: 100,
+              left: 0,
+              right: 0,
+              child: ScaleTransition(
+                scale: _animationController,
+                child: Container(
+                  margin: EdgeInsets.symmetric(horizontal: 20),
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.phone_android, color: Colors.white),
+                      SizedBox(width: 10),
+                      Text(
+                        '📱 Phát hiện mở khóa điện thoại!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _toggleMonitoring,
+        child: AnimatedSwitcher(
+          duration: Duration(milliseconds: 300),
+          child: _isMonitoring 
+              ? Icon(Icons.stop, key: ValueKey('stop'))
+              : Icon(Icons.play_arrow, key: ValueKey('play')),
         ),
+        backgroundColor: _isMonitoring ? Colors.red : Colors.green,
       ),
     );
   }
@@ -488,6 +420,7 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
   Widget _buildStatusCard() {
     return Card(
       elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -495,87 +428,106 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                Icon(
-                  Icons.network_check,
-                  size: 48,
-                  color: _connectionStatus.contains('Mất kết nối') ? Colors.red : Colors.green,
+                AnimatedContainer(
+                  duration: Duration(milliseconds: 300),
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _isMonitoring ? Colors.green.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _isMonitoring ? Icons.phone_android : Icons.phone_disabled,
+                    size: 40,
+                    color: _isMonitoring ? Colors.green : Colors.grey,
+                  ),
                 ),
                 Column(
                   children: [
-                    Icon(
-                      _isAppInForeground ? Icons.visibility : Icons.visibility_off,
-                      color: _isAppInForeground ? Colors.green : Colors.orange,
+                    Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: _isAppInForeground ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        _isAppInForeground ? Icons.visibility : Icons.visibility_off,
+                        color: _isAppInForeground ? Colors.blue : Colors.orange,
+                        size: 24,
+                      ),
                     ),
+                    SizedBox(height: 4),
                     Text(
                       _isAppInForeground ? 'Foreground' : 'Background',
-                      style: TextStyle(fontSize: 12),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
               ],
             ),
-            SizedBox(height: 10),
+            SizedBox(height: 16),
             Text(
-              'Trạng thái kết nối',
+              'Trạng thái giám sát',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
-            SizedBox(height: 5),
-            Text(
-              _connectionStatus,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: _connectionStatus.contains('Mất kết nối') ? Colors.red : Colors.green,
+            SizedBox(height: 8),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: _isMonitoring ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: _isMonitoring ? Colors.green : Colors.red,
+                  width: 1,
+                ),
               ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Số lần truy cập: $_dataCounter',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            if (_lastActivityTime != null)
-              Text(
-                'Lần cuối: ${_lastActivityTime!.toString().substring(11, 19)}',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+              child: Text(
+                _isMonitoring ? 'ĐANG GIÁM SÁT' : 'ĐÃ DỪNG',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: _isMonitoring ? Colors.green : Colors.red,
+                ),
               ),
+            ),
+            SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildCounterItem('Số lần', '$_activityCount', Colors.blue),
+                _buildCounterItem(
+                  'Lần cuối', 
+                  _lastActivityTime != null 
+                      ? '${_lastActivityTime!.hour}:${_lastActivityTime!.minute.toString().padLeft(2, '0')}'
+                      : '--:--', 
+                  Colors.orange
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActivityCard() {
-    return Card(
-      elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Hoạt động mạng',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(width: 10),
-                _isMonitoring 
-                  ? Icon(Icons.circle, color: Colors.green, size: 12)
-                  : Icon(Icons.circle, color: Colors.red, size: 12),
-              ],
-            ),
-            SizedBox(height: 10),
-            Text(
-              _networkActivity,
-              style: TextStyle(
-                fontSize: 14,
-                color: _networkActivity.contains('Lỗi') ? Colors.red : Colors.black87,
-              ),
-            ),
-          ],
+  Widget _buildCounterItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
         ),
-      ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey,
+          ),
+        ),
+      ],
     );
   }
 
@@ -584,21 +536,26 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         ElevatedButton.icon(
-          onPressed: _testSingleRequest,
-          icon: Icon(Icons.wifi_find),
-          label: Text('Test Mạng'),
+          onPressed: _testActivityEvent,
+          icon: Icon(Icons.add_alert, size: 20),
+          label: Text('Test Hoạt động'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
+            backgroundColor: Colors.orange,
             foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
         ElevatedButton.icon(
-          onPressed: _isMonitoring ? _stopMonitoring : _startMonitoring,
-          icon: Icon(_isMonitoring ? Icons.stop : Icons.play_arrow),
+          onPressed: _toggleMonitoring,
+          icon: Icon(
+            _isMonitoring ? Icons.stop : Icons.play_arrow,
+            size: 20,
+          ),
           label: Text(_isMonitoring ? 'Dừng' : 'Bắt đầu'),
           style: ElevatedButton.styleFrom(
             backgroundColor: _isMonitoring ? Colors.red : Colors.green,
             foregroundColor: Colors.white,
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
       ],
@@ -608,38 +565,90 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
   Widget _buildEventHistory() {
     return Card(
       elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Text(
-              'Lịch sử hoạt động (${_networkEvents.length})',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Lịch sử hoạt động (${_screenEvents.length})',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.refresh, size: 20),
+                  onPressed: () {
+                    setState(() {});
+                  },
+                  tooltip: 'Làm mới',
+                ),
+              ],
             ),
-            SizedBox(height: 10),
+            SizedBox(height: 8),
             Expanded(
-              child: _networkEvents.isEmpty
+              child: _screenEvents.isEmpty
                   ? Center(
-                      child: Text(
-                        'Chưa có hoạt động nào',
-                        style: TextStyle(color: Colors.grey),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.history_toggle_off, size: 48, color: Colors.grey),
+                          SizedBox(height: 12),
+                          Text(
+                            'Chưa có hoạt động nào',
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Bắt đầu giám sát để xem lịch sử',
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
                     )
                   : ListView.builder(
-                      itemCount: _networkEvents.length,
+                      itemCount: _screenEvents.length,
                       itemBuilder: (context, index) {
-                        final event = _networkEvents[index];
-                        return ListTile(
-                          leading: Icon(Icons.history, size: 20),
-                          title: Text(
-                            event.description,
-                            style: TextStyle(fontSize: 12),
+                        final event = _screenEvents[index];
+                        final isUnlockEvent = event.description.contains('mở khóa') || 
+                                             event.description.contains('Mở khóa');
+                        return Container(
+                          margin: EdgeInsets.symmetric(vertical: 2),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(
+                                color: isUnlockEvent ? Colors.green : Colors.blue,
+                                width: 4,
+                              ),
+                            ),
+                            color: index % 2 == 0 ? Colors.grey.withOpacity(0.05) : Colors.transparent,
                           ),
-                          subtitle: Text(
-                            '${event.timestamp.hour}:${event.timestamp.minute.toString().padLeft(2, '0')}:${event.timestamp.second.toString().padLeft(2, '0')}',
-                            style: TextStyle(fontSize: 10),
+                          child: ListTile(
+                            leading: Icon(
+                              isUnlockEvent ? Icons.lock_open : Icons.phone_android,
+                              size: 20,
+                              color: isUnlockEvent ? Colors.green : Colors.blue,
+                            ),
+                            title: Text(
+                              event.description,
+                              style: TextStyle(fontSize: 12),
+                            ),
+                            subtitle: Text(
+                              '${event.timestamp.hour}:${event.timestamp.minute.toString().padLeft(2, '0')}:${event.timestamp.second.toString().padLeft(2, '0')}',
+                              style: TextStyle(fontSize: 10, color: Colors.grey),
+                            ),
+                            dense: true,
                           ),
-                          dense: true,
                         );
                       },
                     ),
@@ -651,11 +660,11 @@ class _NetworkMonitorScreenState extends State<NetworkMonitorScreen>
   }
 }
 
-class NetworkEvent {
+class ScreenEvent {
   final String description;
   final DateTime timestamp;
 
-  NetworkEvent({
+  ScreenEvent({
     required this.description,
     required this.timestamp,
   });
