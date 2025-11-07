@@ -1,14 +1,16 @@
-name: network_monitor_ios
-description: "iOS Network Monitor App"
-
+name: Internet_phone_monitor
+description: Ứng dụng cảnh báo sử dụng mạng
 publish_to: 'none'
 
+version: 1.0.0+1
+
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
+
   connectivity_plus: ^5.0.1
   flutter_local_notifications: ^16.3.0
   permission_handler: ^11.0.0
@@ -20,7 +22,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^2.0.0
 
 flutter:
   uses-material-design: true
