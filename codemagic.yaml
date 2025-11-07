@@ -15,8 +15,8 @@ workflows:
     signing:
       ios:
         distribution_certificate:
-          base64: $CM_CERTIFICATE_BASE64          # biến môi trường chứa certificate .p12 (base64)
-          certificate_password: $CERT_PASSWORD    # mật khẩu của certificate
+          base64: $CM_CERTIFICATE_BASE64
+          certificate_password: $CERT_PASSWORD
         provisioning_profile:
-          base64: $CM_PROFILE_BASE64              # biến môi trường chứa provisioning profile (base64)
-        apple_signing: true                        # bật tự động ký
+          base64: $CM_PROFILE_BASE64
+        apple_signing: true
