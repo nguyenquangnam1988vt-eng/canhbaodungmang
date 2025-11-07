@@ -19,4 +19,3 @@ workflows:
           certificate_password: $CERT_PASSWORD
         provisioning_profile:
           base64: $CM_PROFILE_BASE64
-        apple_signing: true
